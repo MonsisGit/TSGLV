@@ -29,14 +29,14 @@ def _pretty_print_results(recall_x_iou, recall_metrics, iou_metrics):
 
 
 def _compute_proposals_feats(v_feat, windows_idx):
-    max_ = len(v_feat)
+    #max_ = len(v_feat)
     proposal_features = []
-    for s, e in windows_idx.tolist():
-        s, e = max(s, 0), min(e, max_)
-        proposal_features.append(torch.mean(v_feat[s:e], dim=0))
+    #for frame in windows_idx.tolist():
 
-    proposal_features = torch.stack(proposal_features)
-    return proposal_features.float()
+        #proposal_features.append(torch.mean(v_feat[s:e], dim=0))
+    #    proposal_features.append(v_feat[int(frame)])
+    #proposal_features = torch.stack(proposal_features)
+    return v_feat.float()
 
 
 def mask_to_moments(mask, num_clips):
@@ -50,15 +50,21 @@ def compute_proposals(num_frames, num_input_frames, stride, MASK, movies_duratio
     windows = {}
     for m, d in tqdm(movies_durations.items()):
         tot_frames = math.ceil(d * FPS)
-        moments = mask_to_moments(MASK, num_frames)
+        #moments = mask_to_moments(MASK, num_frames)
         # starts  = torch.arange(0, tot_frames - num_input_frames, stride, dtype=torch.int)
-        moments = torch.stack(
+        proposals[m] = torch.stack(
             (torch.arange(0, tot_frames - num_input_frames, stride, dtype=torch.int).reshape(-1, 1),
              torch.arange(num_input_frames, tot_frames, stride, dtype=torch.int).reshape(-1, 1)),
             1).squeeze()
+        if proposals[m][-1:, 1] > tot_frames:
+            proposals[m][-1:, 1] = tot_frames
+        if proposals[m][-1:, 1] < tot_frames:
+            proposals[m] = torch.cat(
+                (proposals[m], torch.tensor([proposals[m][-1, 1] - num_input_frames / 2, tot_frames]).reshape(1, 2)))
+
 
         # moments = torch.cat([moments * num_input_frames/num_frames  + s for s in starts])
-        proposals[m] = moments / FPS
+        #proposals[m] = moments / FPS
     return proposals
 
 

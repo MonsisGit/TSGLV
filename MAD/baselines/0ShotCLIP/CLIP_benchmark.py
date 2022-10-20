@@ -6,6 +6,7 @@ from torch.functional import F
 from utils_benchmark import _get_movies_durations, _create_mask, compute_proposals, _compute_proposals_feats, _nms, \
     _pretty_print_results, _iou
 import numpy as np
+from matplotlib import pyplot as plt
 
 # Load annotations
 SPLIT = 'test'
@@ -19,6 +20,7 @@ FPS = 5
 video_feats = h5py.File(f'{root}/CLIP_frames_features_5fps.h5', 'r')
 lang_feats = h5py.File(f'{root}/CLIP_language_features_MAD_{SPLIT}.h5', 'r')
 
+TOP_K = 1
 # Define proposals
 num_frames = 64
 num_input_frames = 60 * FPS * 2
@@ -40,10 +42,11 @@ cosine_similarity = torch.nn.CosineSimilarity(dim=1, eps=1e-6)
 similarity_ranking = {}
 
 # Computer performance
-for k in tqdm(annotations_keys[0:500]):
+for k in tqdm(annotations_keys[::200]):
     movie = test_data[k]['movie']
     prop = proposals[movie]
-    windows_idx = torch.round(prop * FPS).int()
+    # windows_idx = torch.round(prop * FPS).int()
+    # windows_idx = torch.arange(0, movies_durations[movie], 1)
     gt_grounding = torch.tensor(test_data[k]['ext_timestamps'])
 
     # Get movie features and sentence features
@@ -53,7 +56,8 @@ for k in tqdm(annotations_keys[0:500]):
         p_feats = proposals_features[movie]
     except:
         v_feat = torch.tensor(video_feats[movie], dtype=torch.float)
-        p_feats = _compute_proposals_feats(v_feat, windows_idx)
+        # p_feats = _compute_proposals_feats(v_feat, windows_idx)
+        p_feats = v_feat
         proposals_features[movie] = p_feats
 
     sim = cosine_similarity(l_feat, p_feats)
@@ -63,15 +67,33 @@ for k in tqdm(annotations_keys[0:500]):
     # bools = mious[:, None].expand(max_recall, num_iou_metrics) > iou_metrics
     # for i, r in enumerate(recall_metrics):
     #    recall_x_iou[i] += bools[:r].any(dim=0)
+    max_sim_for_window = list()
+    for idx, proposal_window in enumerate(prop):
+        if sim.shape[0]<proposal_window[1]:
+            print(sim.shape)
+        max_sim_for_window.append(float(sim[proposal_window[0].int():proposal_window[1].int()].topk(TOP_K)[0].mean()))
 
-    vals, inds = torch.sort(sim)
+    vals, inds = torch.tensor(max_sim_for_window).sort()
     for idx, proposal_window in enumerate(prop):
         if (proposal_window[0] < gt_grounding[0]) and (proposal_window[1] > gt_grounding[1]):
-            similarity_ranking[f'{k}_{movie}'] = {'top_percent': int(inds[idx]) / sim.shape[0], 'rank': int(inds[idx]),
-                                                  'nm_proposals': sim.shape[0], 'similarity_values': vals}
+            similarity_ranking[f'{k}_{movie}'] = {'top_percent': int(inds[idx]) / inds.shape[0], 'rank': int(inds[idx]),
+                                                  'nm_proposals': inds.shape[0], 'gt': gt_grounding,
+                                                  'proposal_window': proposal_window}
+            if inds[idx] < 3:
+                plt.figure()
+                plt.plot(sim)
+                plt.plot(gt_grounding * 5, [sim.max(), sim.max()], c='r', linewidth=4)
+                plt.title(k + "_" + movie + " gt: " + str(gt_grounding))
+                plt.savefig("plots/" + k + "_" + movie + ".jpg")
+                plt.close()
 
-#recall_x_iou /= len(annotations_keys)
-#_pretty_print_results(recall_x_iou, recall_metrics, iou_metrics)
+# recall_x_iou /= len(annotations_keys)
+# _pretty_print_results(recall_x_iou, recall_metrics, iou_metrics)
 
-print(f'Avg Top percent: {np.average([similarity_ranking[k]["top_percent"] for k in similarity_ranking.keys()])*100:.2f}%')
-print(f'Average number of proposals: {np.average([similarity_ranking[k]["nm_proposals"] for k in similarity_ranking.keys()])}')
+print(
+    f'Avg Top percent: {np.average([similarity_ranking[k]["top_percent"] for k in similarity_ranking.keys()]):.2f}')
+print(
+    f'Avg std of top percent: {np.std([similarity_ranking[k]["top_percent"] for k in similarity_ranking.keys()]):.2f}')
+print(
+    f'Average number of proposals: {np.average([similarity_ranking[k]["nm_proposals"] for k in similarity_ranking.keys()])}')
+
