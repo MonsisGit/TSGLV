@@ -7,7 +7,7 @@ from utils import _get_movies_durations, _create_mask, _compute_VLG_proposals, _
 
 # Load annotations 
 SPLIT='test'
-root = './datasets/MAD' 
+root = '/nfs/data3/goldhofer/mad_dataset'
 test_data = json.load(open(f'{root}/annotations/MAD_{SPLIT}.json','r'))
 annotations_keys = list(test_data.keys())
 movies_durations = _get_movies_durations(annotations_keys, test_data)
