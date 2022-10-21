@@ -22,7 +22,7 @@ video_feats = h5py.File(f'{root}/CLIP_frames_features_5fps.h5', 'r')
 lang_feats = h5py.File(f'{root}/CLIP_language_features_MAD_{SPLIT}.h5', 'r')
 grid = {}
 
-for TOP_K_FRAMES in [1, 5, 10, 20]:
+for TOP_K_FRAMES in [15, 20]:
     for WINDOW_LENGTH in [25, 50, 120]:
         try:
 
@@ -52,7 +52,7 @@ for TOP_K_FRAMES in [1, 5, 10, 20]:
             nm_proposals = []
 
             # Computer performance
-            for k in tqdm(annotations_keys[0:5]):
+            for k in tqdm(annotations_keys):
                 movie = test_data[k]['movie']
                 prop = proposals[movie]
                 # windows_idx = torch.round(prop * FPS).int()
@@ -104,7 +104,7 @@ for TOP_K_FRAMES in [1, 5, 10, 20]:
             print(f"Acc for TopK frames: {TOP_K_FRAMES}, Top20 proposals is: {acc_top20 * 100:.2f}%")
             print(f"Acc for TopK frames: {TOP_K_FRAMES}, Top50 proposals is: {acc_top50 * 100:.2f}%")
 
-            grid[f"FL_{TOP_K_FRAMES}_WL_{WINDOW_LENGTH}"] = {'Top10': acc_top10, 'Top20': acc_top20, 'Top50': acc_top50,
+            grid[f"TopF_{TOP_K_FRAMES}_WL_{WINDOW_LENGTH}"] = {'Top10': acc_top10, 'Top20': acc_top20, 'Top50': acc_top50,
                                                              'avg_nm_prop': avg_nm_proposals}
         except Exception as e:
             print(e)
@@ -117,5 +117,5 @@ try:
 except Exception as e:
     print(e)
 
-with open('/nfs/data3/goldhofer/grid.json', 'w') as fp:
+with open('/nfs/data3/goldhofer/grid2.json', 'w') as fp:
     json.dump(grid, fp)
