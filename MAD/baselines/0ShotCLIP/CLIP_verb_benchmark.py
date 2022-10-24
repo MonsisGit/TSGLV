@@ -55,7 +55,7 @@ for TOP_K_FRAMES in [10,20]:
         nm_proposals = []
 
         # Computer performance
-        for k in tqdm(annotations_keys):
+        for k in tqdm(annotations_keys[10]):
             movie = test_data[k]['movie']
             prop = proposals[movie]
             inside_top10_proposals = 0
@@ -123,7 +123,7 @@ for TOP_K_FRAMES in [10,20]:
     plt.title("Acc per number of verbs in query")
     plt.xlabel("number of verbs in query")
     plt.ylabel(f"acc [%] (TopP=10,TopF={TOP_K_FRAMES}, Wl = 60)")
-    plt.savefig(f"/nfs/data3/goldhofer/clip_acc_per_nm_verbs_{TOP_K_FRAMES}.jpg")
+    plt.savefig(f"/nfs/data3/goldhofer/clip_acc_per_nm_verbs_new{TOP_K_FRAMES}.jpg")
     plt.close()
     plt.clf()
 
@@ -133,7 +133,7 @@ for TOP_K_FRAMES in [10,20]:
     plt.title("Acc per number of nouns in query")
     plt.xlabel("number of nouns in query")
     plt.ylabel(f"acc [%] (TopP=10,TopF={TOP_K_FRAMES} Wl = 60)")
-    plt.savefig(f"/nfs/data3/goldhofer/clip_acc_per_nm_nouns_{TOP_K_FRAMES}.jpg")
+    plt.savefig(f"/nfs/data3/goldhofer/clip_acc_per_nm_nouns_new{TOP_K_FRAMES}.jpg")
 
     with open(f'/nfs/data3/goldhofer/verb_noun_acc_benchmark_{TOP_K_FRAMES}.json', 'w') as fp:
         json.dump(grid, fp)
