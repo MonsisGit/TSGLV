@@ -11,3 +11,4 @@ models/ops/*
 data/
 output/
 visualize/
+__pycache__
