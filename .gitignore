@@ -1,6 +1,6 @@
 *runs
 *resources
-.idea
+.idea/
 *weights
 *__pycache__
 trained_weights
