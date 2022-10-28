@@ -1,12 +1,9 @@
 import h5py
-import json
 import torch
+from torchmetrics.classification import BinaryRecall
 from tqdm import tqdm
-from torch.functional import F
-from utils_benchmark import _get_movies_durations, _create_mask, compute_proposals, _compute_proposals_feats, _nms, \
-    _pretty_print_results, _iou
+from utils_benchmark import _get_movies_durations, _create_mask, compute_proposals
 import numpy as np
-from matplotlib import pyplot as plt
 import json
 
 # Load annotations
@@ -23,6 +20,8 @@ lang_feats = h5py.File(f'{root}/CLIP_language_features_MAD_{SPLIT}.h5', 'r')
 grid = {}
 
 TOP_K_FRAMES =20
+TOP_K_PROPOSALS = [1,5,10]
+recall = BinaryRecall()
 
 for WINDOW_LENGTH in [25, 50, 120]:
     try:
@@ -51,30 +50,26 @@ for WINDOW_LENGTH in [25, 50, 120]:
         cosine_similarity = torch.nn.CosineSimilarity(dim=1, eps=1e-6)
         similarity_ranking = {}
         nm_proposals = []
+        recall_metrics = torch.zeros((len(annotations_keys),len(TOP_K_PROPOSALS)))
 
         # Computer performance
         for k in tqdm(annotations_keys):
             movie = test_data[k]['movie']
             prop = proposals[movie]
-            # windows_idx = torch.round(prop * FPS).int()
-            # windows_idx = torch.arange(0, movies_durations[movie], 1)
+
             gt_grounding = torch.tensor(test_data[k]['ext_timestamps'])
             nm_queries_run += 1
-            # Get movie features and sentence features
             l_feat = torch.tensor(lang_feats[k], dtype=torch.float)[None, :]
 
             try:
                 p_feats = proposals_features[movie]
             except:
                 v_feat = torch.tensor(video_feats[movie], dtype=torch.float)
-                # p_feats = _compute_proposals_feats(v_feat, windows_idx)
                 p_feats = v_feat
                 proposals_features[movie] = p_feats
 
-            #mean_pooled_v_feats = v_feat[prop[0].long()[0]:prop[1].long()[0],:].mean(axis=0)
-
-            v_feat_shifted_forward = v_feat[int((WINDOW_LENGTH * FPS)/2):, :]
-            v_feat_shifted_backwards = v_feat[:-int((WINDOW_LENGTH * FPS)), :]
+            v_feat_shifted_forward = p_feats[int((WINDOW_LENGTH * FPS)/2):, :]
+            v_feat_shifted_backwards = p_feats[:-int((WINDOW_LENGTH * FPS)), :]
 
             v_feat_shifted_forward = v_feat_shifted_forward[0:min(v_feat_shifted_backwards.shape[0], v_feat_shifted_forward.shape[0]), :]
             v_feat_shifted_backwards = v_feat_shifted_backwards[0:min(v_feat_shifted_backwards.shape[0], v_feat_shifted_forward.shape[0]), :]
@@ -91,50 +86,24 @@ for WINDOW_LENGTH in [25, 50, 120]:
             v_feat_concat[1::2] = v_feat_shifted_forward
 
             sim = cosine_similarity(l_feat, v_feat_concat)
-            # best_moments = _nms(prop, sim, topk=recall_metrics[-1], thresh=0.3)
 
-            # mious = _iou(best_moments[:max_recall], gt_grounding)
-            # bools = mious[:, None].expand(max_recall, num_iou_metrics) > iou_metrics
-            # for i, r in enumerate(recall_metrics):
-            #    recall_x_iou[i] += bools[:r].any(dim=0)
-            max_sim_for_window = list()
-            for idx, proposal_window in enumerate(prop):
-                if sim.shape[0] >= proposal_window[1]:
-                    max_sim_for_window.append(
-                        float(sim[proposal_window[0].int():proposal_window[1].int()].topk(TOP_K_FRAMES)[0].mean()))
+            vals, inds = torch.sort(sim)
+            preds = torch.zeros_like(inds)
+            targets = torch.zeros_like(inds)
 
-            vals, inds = torch.tensor(max_sim_for_window).sort(descending=True)
-            for idx, proposal_window in enumerate(prop):
-                if (proposal_window[0] <= gt_grounding[0]) and (proposal_window[1] >= gt_grounding[1]):
-                    if idx in inds[0:10]:
-                        inside_top10_proposals += 1
-                    if idx in inds[0:20]:
-                        inside_top20_proposals += 1
-                    if idx in inds[0:50]:
-                        inside_top50_proposals += 1
+            for idk in range(len(TOP_K_PROPOSALS)):
+                preds[inds[0:TOP_K_PROPOSALS[idk]]] = 1
+                target_proposal_bounds = torch.tensor([torch.floor(gt_grounding[0]/WINDOW_LENGTH),torch.floor(gt_grounding[1]/WINDOW_LENGTH)]).unique()
+                targets[target_proposal_bounds.long()] = 1
+                recall_metrics[int(k),idk] = recall(preds, targets)
 
-            nm_proposals.append(idx)
 
-        acc_top10 = inside_top10_proposals / nm_queries_run
-        acc_top20 = inside_top20_proposals / nm_queries_run
-        acc_top50 = inside_top50_proposals / nm_queries_run
-        avg_nm_proposals = np.average(nm_proposals)
 
-        print(f"Acc for TopK frames: {TOP_K_FRAMES}, Top10 proposals is: {acc_top10 * 100:.2f}%")
-        print(f"Acc for TopK frames: {TOP_K_FRAMES}, Top20 proposals is: {acc_top20 * 100:.2f}%")
-        print(f"Acc for TopK frames: {TOP_K_FRAMES}, Top50 proposals is: {acc_top50 * 100:.2f}%")
+        mean_recall = recall_metrics.mean(axis=0)
 
-        grid[f"TopF_{TOP_K_FRAMES}_WL_{WINDOW_LENGTH}"] = {'Top10': acc_top10, 'Top20': acc_top20, 'Top50': acc_top50,
-                                                         'avg_nm_prop': avg_nm_proposals}
+        for idk in range(len(TOP_K_PROPOSALS)):
+            print(f"WL: {WINDOW_LENGTH} R@{TOP_K_PROPOSALS[idk]} = {mean_recall[idk]}")
+
     except Exception as e:
         print(e)
-try:
-    for key in grid.keys():
-        print(key)
-        for k, v in grid[key].items():
-            print(f'{k}: {v}')
-except Exception as e:
-    print(e)
 
-with open('/nfs/data3/goldhofer/grid2.json', 'w') as fp:
-    json.dump(grid, fp)
