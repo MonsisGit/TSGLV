@@ -1,9 +1,9 @@
 import h5py
 import torch
-from torchmetrics.classification import BinaryRecall
+from torchmetrics.classification import BinaryRecall, BinaryPrecision
 from tqdm import tqdm
 from utils_benchmark import _get_movies_durations, _create_mask, compute_proposals
-import numpy as np
+import traceback
 import json
 
 # Load annotations
@@ -21,9 +21,10 @@ grid = {}
 
 TOP_K_FRAMES =20
 TOP_K_PROPOSALS = [1,5,10]
-recall = BinaryRecall()
+rec = BinaryRecall()
+prec = BinaryPrecision()
 
-for WINDOW_LENGTH in [25, 50, 120]:
+for WINDOW_LENGTH in [120]:
     try:
 
         nm_queries_run = 0
@@ -51,59 +52,66 @@ for WINDOW_LENGTH in [25, 50, 120]:
         similarity_ranking = {}
         nm_proposals = []
         recall_metrics = torch.zeros((len(annotations_keys),len(TOP_K_PROPOSALS)))
+        precision_metrics = torch.zeros((len(annotations_keys), len(TOP_K_PROPOSALS)))
 
         # Computer performance
-        for k in tqdm(annotations_keys):
-            movie = test_data[k]['movie']
-            prop = proposals[movie]
-
-            gt_grounding = torch.tensor(test_data[k]['ext_timestamps'])
-            nm_queries_run += 1
-            l_feat = torch.tensor(lang_feats[k], dtype=torch.float)[None, :]
-
+        for k in tqdm(annotations_keys[0:-2]):
             try:
-                p_feats = proposals_features[movie]
-            except:
-                v_feat = torch.tensor(video_feats[movie], dtype=torch.float)
-                p_feats = v_feat
-                proposals_features[movie] = p_feats
+                movie = test_data[k]['movie']
+                prop = proposals[movie]
 
-            v_feat_shifted_forward = p_feats[int((WINDOW_LENGTH * FPS)/2):, :]
-            v_feat_shifted_backwards = p_feats[:-int((WINDOW_LENGTH * FPS)), :]
+                gt_grounding = torch.tensor(test_data[k]['ext_timestamps'])
+                nm_queries_run += 1
+                l_feat = torch.tensor(lang_feats[k], dtype=torch.float)[None, :]
 
-            v_feat_shifted_forward = v_feat_shifted_forward[0:min(v_feat_shifted_backwards.shape[0], v_feat_shifted_forward.shape[0]), :]
-            v_feat_shifted_backwards = v_feat_shifted_backwards[0:min(v_feat_shifted_backwards.shape[0], v_feat_shifted_forward.shape[0]), :]
+                try:
+                    p_feats = proposals_features[movie]
+                except:
+                    v_feat = torch.tensor(video_feats[movie], dtype=torch.float)
+                    p_feats = v_feat
+                    proposals_features[movie] = p_feats
 
-            rm_ind = v_feat_shifted_forward.shape[0] - v_feat_shifted_forward.shape[0] % (WINDOW_LENGTH * FPS)
-            v_feat_shifted_forward = v_feat_shifted_forward[0:rm_ind, :]
-            v_feat_shifted_backwards = v_feat_shifted_backwards[0:rm_ind, :]
+                v_feat_shifted_forward = p_feats[int((WINDOW_LENGTH * FPS)/2):, :]
+                v_feat_shifted_backwards = p_feats[:-int((WINDOW_LENGTH * FPS)), :]
 
-            v_feat_shifted_forward = torch.reshape(v_feat_shifted_forward,(WINDOW_LENGTH*FPS,512,-1)).mean(axis=0).reshape(-1,512)
-            v_feat_shifted_backwards = torch.reshape(v_feat_shifted_backwards, (WINDOW_LENGTH * FPS, 512, -1)).mean(axis=0).reshape(-1, 512)
+                v_feat_shifted_forward = v_feat_shifted_forward[0:min(v_feat_shifted_backwards.shape[0], v_feat_shifted_forward.shape[0]), :]
+                v_feat_shifted_backwards = v_feat_shifted_backwards[0:min(v_feat_shifted_backwards.shape[0], v_feat_shifted_forward.shape[0]), :]
 
-            v_feat_concat = torch.zeros((v_feat_shifted_forward.shape[0] * 2, v_feat_shifted_forward.shape[1]))
-            v_feat_concat[::2] = v_feat_shifted_backwards
-            v_feat_concat[1::2] = v_feat_shifted_forward
+                rm_ind = v_feat_shifted_forward.shape[0] - v_feat_shifted_forward.shape[0] % (WINDOW_LENGTH * FPS)
+                v_feat_shifted_forward = v_feat_shifted_forward[0:rm_ind, :]
+                v_feat_shifted_backwards = v_feat_shifted_backwards[0:rm_ind, :]
 
-            sim = cosine_similarity(l_feat, v_feat_concat)
+                v_feat_shifted_forward = torch.reshape(v_feat_shifted_forward,(WINDOW_LENGTH*FPS,512,-1)).mean(axis=0).reshape(-1,512)
+                v_feat_shifted_backwards = torch.reshape(v_feat_shifted_backwards, (WINDOW_LENGTH * FPS, 512, -1)).mean(axis=0).reshape(-1, 512)
 
-            vals, inds = torch.sort(sim)
-            preds = torch.zeros_like(inds)
-            targets = torch.zeros_like(inds)
+                v_feat_concat = torch.zeros((v_feat_shifted_forward.shape[0] * 2, v_feat_shifted_forward.shape[1]))
+                v_feat_concat[::2] = v_feat_shifted_backwards
+                v_feat_concat[1::2] = v_feat_shifted_forward
 
-            for idk in range(len(TOP_K_PROPOSALS)):
-                preds[inds[0:TOP_K_PROPOSALS[idk]]] = 1
-                target_proposal_bounds = torch.tensor([torch.floor(gt_grounding[0]/WINDOW_LENGTH),torch.floor(gt_grounding[1]/WINDOW_LENGTH)]).unique()
+                sim = cosine_similarity(l_feat, v_feat_concat)
+
+                _, inds = torch.sort(sim,descending=True)
+                preds = torch.zeros_like(inds)
+                targets = torch.zeros_like(inds)
+
+                target_proposal_bounds = torch.tensor([torch.floor(gt_grounding[0] / WINDOW_LENGTH),
+                                                       torch.floor(gt_grounding[1] / WINDOW_LENGTH)]).unique()
                 targets[target_proposal_bounds.long()] = 1
-                recall_metrics[int(k),idk] = recall(preds, targets)
 
+                for idk in range(len(TOP_K_PROPOSALS)):
+                    preds[inds[0:TOP_K_PROPOSALS[idk]]] = 1
+                    recall_metrics[int(k),idk] = rec(preds, targets)
+                    precision_metrics[int(k), idk] = prec(preds, targets)
 
+            except Exception:
+                print(traceback.format_exc())
 
         mean_recall = recall_metrics.mean(axis=0)
+        mean_precision = precision_metrics.mean(axis=0)
 
         for idk in range(len(TOP_K_PROPOSALS)):
             print(f"WL: {WINDOW_LENGTH} R@{TOP_K_PROPOSALS[idk]} = {mean_recall[idk]}")
+            print(f"WL: {WINDOW_LENGTH} Precision@{TOP_K_PROPOSALS[idk]} = {mean_precision[idk]}\n")
 
     except Exception as e:
         print(e)
-
