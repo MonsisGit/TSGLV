@@ -24,7 +24,7 @@ TOP_K_PROPOSALS = [1,5,10]
 rec = BinaryRecall()
 prec = BinaryPrecision()
 
-for WINDOW_LENGTH in [120]:
+for WINDOW_LENGTH in [120,30]:
     try:
 
         nm_queries_run = 0
@@ -55,7 +55,7 @@ for WINDOW_LENGTH in [120]:
         precision_metrics = torch.zeros((len(annotations_keys), len(TOP_K_PROPOSALS)))
 
         # Computer performance
-        for k in tqdm(annotations_keys[0:-2]):
+        for idx,k in tqdm(enumerate(annotations_keys[-500:-2])):
             try:
                 movie = test_data[k]['movie']
                 prop = proposals[movie]
@@ -100,8 +100,8 @@ for WINDOW_LENGTH in [120]:
 
                 for idk in range(len(TOP_K_PROPOSALS)):
                     preds[inds[0:TOP_K_PROPOSALS[idk]]] = 1
-                    recall_metrics[int(k),idk] = rec(preds, targets)
-                    precision_metrics[int(k), idk] = prec(preds, targets)
+                    recall_metrics[idx,idk] = rec(preds, targets)
+                    precision_metrics[idx, idk] = prec(preds, targets)
 
             except Exception:
                 print(traceback.format_exc())
